@@ -5,6 +5,9 @@ var sourcemap = Npm.require('source-map');
 var unipackage = Npm.require('./unipackage.js');
 var release = Npm.require('./release.js');
 
+// We will load the minifiers package.  This is the same package
+// which is used internally by the bundler to combine & minify
+// css and js for use in Meteor applications.
 var minifiers = unipackage.load({
   library: release.current.library,
   packages: ['minifiers']
@@ -12,6 +15,7 @@ var minifiers = unipackage.load({
 
 var CssTools = minifiers.CssTools;
 
+// Re-implementations of useful functions from the bundler for handling CSS
 function mergeCss(css) {
   var originals = {};
   var cssAsts = _.map(css, function(options) {
@@ -70,13 +74,20 @@ function minifyCss(css) {
   }
 }
 
+// Generates a handler for a lazy version of an extension.
+// Will delegate compiling to the original extension, but also 
+// handle making the extension lazy loaded.
 function genHandler(extension, handler) {
   return function(compileStep) {
     var isBrowser = compileStep.archMatches('browser');
 
+    // Currently we only serve lazy files on the client, It may make sense
+    // to serve them on both the client and the server (as assets on both),
+    // and allow you to lazy-load them on both.
     if (!isBrowser)
       return;
 
+    // TODO: Map sourcemaps correctly through frontmatter stripping
     var fm = frontMatter.loadFront(compileStep.read());
 
     // You can declare that a file shouldn't be served in the frontmatter
@@ -85,16 +96,18 @@ function genHandler(extension, handler) {
     if (fm.no_serve)
       return;
 
-    var contents = new Buffer(fm.__content, 'utf8');
-
+    // The css and js files which need to be served lazily
     var css = [];
     var js = [];
+
+    var contents = new Buffer(fm.__content, 'utf8');
 
     var readOffset = 0;
     // Shim around the compileStep to capture addStylesheet & addJavaScript calls
     var cStep = _.defaults({
       inputSize: contents.length,
 
+      // The file passed into the original reader has the frontmatter stripped.
       read: function(n) {
         if (n === undefined || readOffset + n > contents.length)
           n = contents.length - readOffset;
@@ -135,6 +148,7 @@ function genHandler(extension, handler) {
       }
     }, compileStep);
 
+    // Call the original handler, and capture any emitted assets.
     handler(cStep);
 
     var clientJs = "// Notify client about existence of lazy loadable files\n";
@@ -151,7 +165,7 @@ function genHandler(extension, handler) {
         css = minifyCss(css);
 
       if (css.sourceMap) {
-        css.data += "\n\n/*# sourceMappingURL=" + path.basename(compileStep.inputPath) + ".css.map */";
+        css.data += "\n\n/*# sourceMappingURL=" + path.basename(compileStep.inputPath) + ".css.map */\n";
 
         compileStep.addAsset({
           data: new Buffer(css.sourceMap, 'utf8'),
@@ -163,13 +177,46 @@ function genHandler(extension, handler) {
         data: new Buffer(css.data, 'utf8'),
         path: compileStep.inputPath + ".css"
       });
-      console.log(compileStep);
 
       clientJs += "Package.lazy.Lazy.__register_css(" + JSON.stringify(compileStep.inputPath + ".css") + ");\n";
     }
 
     if (js.length > 0) {
-      // TODO: Implement
+      var jsSrc, jsMap;
+      if (js.length > 1) {
+        // TODO: Support Sourcemaps through concatenation
+        jsSrc = _.map(js, function(options) {
+          return options.data;
+        }).join('\n;\n');
+        jsMap = null;
+      } else {
+        jsSrc = js[0].data;
+        jsMap = js[0].sourceMap;
+      }
+
+      if (fm.minify) {
+        jsSrc = minifiers.UglifyJSMinify(jsSrc, {
+          fromString: true,
+          compress: {drop_debugger: false}
+        }).code;
+        jsMap = null;
+      }
+
+      if (jsMap) {
+        jsSrc += "\n\n/*# sourceMappingURL=" + path.basename(compileStep.inputPath) + ".js.map */\n";
+
+        compileStep.addAsset({
+          data: new Buffer(jsMap, 'utf8'),
+          path: compileStep.inputPath + ".js.map"
+        });
+      }
+
+      compileStep.addAsset({
+        data: new Buffer(jsSrc, 'utf8'),
+        path: compileStep.inputPath + ".js"
+      });
+
+      clientJs += "Package.lazy.Lazy.__register_js(" + JSON.stringify(compileStep.inputPath + ".js") + ");\n";
     }
 
     // Register these files on the client
@@ -181,6 +228,7 @@ function genHandler(extension, handler) {
   }
 }
 
+// Registers a handler for the lazy version of an extension
 function registerExtension(extension, handler) {
   if (/^lazy\./.test(extension))
     return;
@@ -188,6 +236,10 @@ function registerExtension(extension, handler) {
   Plugin.registerSourceHandler('lazy.' + extension, genHandler(extension, handler));
 }
 
+// Registers a handler for the lazy version of all extensions added by
+// smart packages. This is done when this package is loaded, and will
+// not correctly identify extensions added by smart packages after
+// the lazy plugin has been loaded.
 function registerSourceHandlers() {
   var library = release.current.library;
 
@@ -207,6 +259,9 @@ function registerSourceHandlers() {
   }
 }
 
+// Basic handler for javascript files. Js files aren't handled by any
+// package (as handlers are written in javascript), so it has to be implemented
+// seperately.
 function jsRawHandler(compileStep) {
   compileStep.addJavaScript({
     data: compileStep.read().toString('utf8'),
@@ -217,7 +272,12 @@ function jsRawHandler(compileStep) {
 
 // Register the extensions which will be supported by meteor-lazy
 registerExtension('js', jsRawHandler);
-
-// Everything other than js is provided by code, registerSourceHandlers should automatically find them.
 registerSourceHandlers();
 
+// Meteor Lazy will support lazy packages, which are lazily loaded bundles
+// of code. It allows for multiple files to be combined together before
+// they are lazily loaded.
+Plugin.registerSourceHandler('lazypackage', function(compileStep) {
+  // TODO: Implement
+  console.warn('Lazy packages have not been implemented yet');
+});
