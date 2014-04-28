@@ -4,6 +4,7 @@ var path = Npm.require('path');
 var sourcemap = Npm.require('source-map');
 var unipackage = Npm.require('./unipackage.js');
 var release = Npm.require('./release.js');
+var Fiber = Npm.require('fibers');
 
 // We will load the minifiers package.  This is the same package
 // which is used internally by the bundler to combine & minify
@@ -74,6 +75,46 @@ function minifyCss(css) {
   }
 }
 
+function mergeSourceMaps(first, second) {
+  first = JSON.parse(first);
+  second = JSON.parse(second);
+
+  var map = sourcemap.SourceMapGenerator.fromSourceMap(new sourcemap.SourceMapConsumer(second));
+  map.applySourceMap(new sourcemap.SourceMapConsumer(first));
+
+  return map.toString();
+}
+
+function stripFrontMatter(data, pathForSourceMap) {
+  var map = new sourcemap.SourceNode(null, null, null, "");
+  var sourceLines = data.split('\n');
+  var inFm = /^--- *\n/.test(data);
+  var fmSrc = '';
+
+  // Don't use the first line to end the frontmatter
+  if (inFm)
+    sourceLines = sourceLines.slice(1);
+
+  _.each(sourceLines, function(line, linum) {
+    if (inFm) {
+      if (/^--- *$/.test(line))
+        inFm = false;
+      else
+        fmSrc += "\n" + line;
+    } else {
+      map.add(new sourcemap.SourceNode(linum + 2, 0, pathForSourceMap, line + '\n'));
+    }
+  });
+
+  // TODO: Actually parse the frontmatter
+  var fm = {};
+
+  var ret = map.toStringWithSourceMap({ file: pathForSourceMap });
+  ret.fm = fm;
+
+  return ret;
+}
+
 // Generates a handler for a lazy version of an extension.
 // Will delegate compiling to the original extension, but also 
 // handle making the extension lazy loaded.
@@ -81,14 +122,14 @@ function genHandler(extension, handler) {
   return function(compileStep) {
     var isBrowser = compileStep.archMatches('browser');
 
-    // Currently we only serve lazy files on the client, It may make sense
-    // to serve them on both the client and the server (as assets on both),
-    // and allow you to lazy-load them on both.
-    //if (!isBrowser)
-      //return;
-
     // TODO: Map sourcemaps correctly through frontmatter stripping
-    var fm = frontMatter.loadFront(compileStep.read());
+    var data = compileStep.read();
+    // var fm = frontMatter.loadFront(data);
+    var beforeCompile = stripFrontMatter(data.toString('utf8'), compileStep.pathForSourceMap);
+
+    var fm = beforeCompile.fm;
+    var contents = new Buffer(beforeCompile.code, 'utf8');
+
 
     // You can declare that a file shouldn't be served in the frontmatter
     // If you do this, it won't be served to the client.
@@ -100,7 +141,7 @@ function genHandler(extension, handler) {
     var css = [];
     var js = [];
 
-    var contents = new Buffer(fm.__content, 'utf8');
+    // var contents = new Buffer(fm.__content, 'utf8');
 
     var readOffset = 0;
     // Shim around the compileStep to capture addStylesheet & addJavaScript calls
@@ -194,7 +235,21 @@ function genHandler(extension, handler) {
         jsMap = null;
       } else {
         jsSrc = js[0].data;
-        jsMap = js[0].sourceMap;
+        if (js[0].sourceMap)
+          jsMap = mergeSourceMaps(beforeCompile.map.toString(), js[0].sourceMap);
+        else
+          jsMap = beforeCompile.map.toString();
+
+        // Ensure we have the correct source material
+        var parsedMap = JSON.parse(jsMap);
+        parsedMap.sourcesContent = parsedMap.sourcesContent || {};
+        _.each(parsedMap.sources, function(v, k) {
+          if (v === compileStep.pathForSourceMap)
+            parsedMap.sourcesContent[k] = data.toString('utf8');
+        });
+        // parsedMap.sourcesContent[compileStep.pathForSourceMap] = data.toString('utf8');
+        parsedMap.file = compileStep.pathForSourceMap + ".js";
+        jsMap = JSON.stringify(parsedMap);
       }
 
       if (fm.minify) {
@@ -206,7 +261,9 @@ function genHandler(extension, handler) {
       }
 
       if (jsMap) {
-        jsSrc += "\n\n/*# sourceMappingURL=" + path.basename(compileStep.inputPath) + ".js.map */\n";
+        jsSrc += "\n//# sourceMappingURL=" + path.basename(compileStep.inputPath) + ".js.map\n";
+
+        console.log('woo Map!');
 
         compileStep.addAsset({
           data: new Buffer(jsMap, 'utf8'),
@@ -246,6 +303,8 @@ function registerExtension(extension, handler) {
   if (/^lazy\./.test(extension))
     return;
 
+  console.log("registered:", extension);
+
   Plugin.registerSourceHandler('lazy.' + extension, genHandler(extension, handler));
 }
 
@@ -260,17 +319,30 @@ function registerSourceHandlers() {
   var loaded = library.loadedPackages;
 
   for (k in soft) {
+    if (k === 'lazy')
+      continue;
+
+    // Make sure that the other plugin has initialized first
+    soft[k].pkg._ensurePluginsInitialized();
+
     var sourceHandlers = soft[k].pkg.sourceHandlers;
     for (extension in sourceHandlers)
       registerExtension(extension, sourceHandlers[extension]);
   }
 
   for (k in loaded) {
+    if (k === 'lazy')
+      continue;
+
+    // Make sure that the other plugin has initialized first
+    loaded[k].pkg._ensurePluginsInitialized();
+
     var sourceHandlers = loaded[k].pkg.sourceHandlers;
     for (extension in sourceHandlers)
       registerExtension(extension, sourceHandlers[extension]);
   }
 }
+
 
 // Basic handler for javascript files. Js files aren't handled by any
 // package (as handlers are written in javascript), so it has to be implemented
@@ -284,8 +356,8 @@ function jsRawHandler(compileStep) {
 }
 
 // Register the extensions which will be supported by meteor-lazy
-registerExtension('js', jsRawHandler);
 registerSourceHandlers();
+registerExtension('js', jsRawHandler);
 
 // Meteor Lazy will support lazy packages, which are lazily loaded bundles
 // of code. It allows for multiple files to be combined together before
