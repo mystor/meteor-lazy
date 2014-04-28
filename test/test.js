@@ -15,7 +15,10 @@ if (Meteor.isClient) {
 if (Meteor.isServer) {
   Meteor.startup(function () {
     // code to run on server at startup
+    console.log(Assets.getText('woop.js'));
+    console.log(Assets.getText('test.lazy.js.js'));
     Lazy.load('test.lazy.js');
+    console.log(Assets.getText("test.lazy.js.js"));
   });
-
 }
+
