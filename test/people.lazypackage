@@ -1,7 +1,0 @@
-name: 'test-package'
-
-files:
-  - test.lazy.js
-  - test.lazy.css
-  - test.lazy.coffee
-
