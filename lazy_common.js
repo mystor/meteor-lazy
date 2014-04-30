@@ -46,8 +46,8 @@ Lazy = {
   // We accept Npm and Assets such that the correct Npm and Assets
   // objects can be provided to the file when it is lazy-loaded on
   // the server.
-  _register: function _register(options, Npm, Assets) {
-    var file = new File(options.js, options.css, Npm, Assets);
+  _register: function _register(options, evalFn, Assets) {
+    var file = new File(options.js, options.css, evalFn, Assets);
     
     if (options.path) {
       if (files.hasOwnProperty(options.path))

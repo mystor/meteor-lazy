@@ -1,32 +1,21 @@
 {
   "dependencies": {
-    "yaml-front-matter": {
+    "js-yaml": {
       "version": "3.0.1",
       "dependencies": {
-        "commander": {
-          "version": "1.0.0"
-        },
-        "js-yaml": {
-          "version": "3.0.2",
+        "argparse": {
+          "version": "0.1.15",
           "dependencies": {
-            "argparse": {
-              "version": "0.1.15",
-              "dependencies": {
-                "underscore": {
-                  "version": "1.4.4"
-                },
-                "underscore.string": {
-                  "version": "2.3.3"
-                }
-              }
+            "underscore": {
+              "version": "1.4.4"
             },
-            "esprima": {
-              "version": "1.0.4"
+            "underscore.string": {
+              "version": "2.3.3"
             }
           }
         },
-        "is-browser": {
-          "version": "2.0.0"
+        "esprima": {
+          "version": "1.0.4"
         }
       }
     }
