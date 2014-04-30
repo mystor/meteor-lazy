@@ -6,6 +6,6 @@
 standard-app-packages
 autopublish
 insecure
-lazy
 coffeescript
 less
+lazy
