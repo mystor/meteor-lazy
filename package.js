@@ -1,5 +1,5 @@
 Package.describe({
-  summary: "woo"
+  summary: "Lazily load any file type"
 });
 
 Package._transitional_registerBuildPlugin({
