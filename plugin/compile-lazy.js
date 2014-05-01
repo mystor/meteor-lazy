@@ -379,6 +379,13 @@ registerExtension('js', jsRawHandler);
 // they are lazily loaded.
 Plugin.registerSourceHandler('lazypackage', function(compileStep) {
   var options = yaml.safeLoad(compileStep.read().toString('utf8'));
+  var js = [];
+  var css = [];
+
+  _.each(options.files, function(file) {
+    var cStep = {
+    };
+  });
 
   console.log(options);
   // TODO: Implement

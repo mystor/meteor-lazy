@@ -6,7 +6,7 @@ File = function(js, css, evalFn) {
 };
 
 _.extend(File.prototype, {
-  load: function() {
+  load: function(callback) {
     var self = this;
 
     var loadedTarget = this.js.length + this.css.length;
@@ -21,6 +21,9 @@ _.extend(File.prototype, {
         loadedCount++;
         if (loadedCount >= loadedTarget) {
           self._evalJs(loaded);
+
+          if (typeof callback === 'function')
+            callback(null);
         }
       });
       document.head.appendChild(link);
@@ -32,7 +35,10 @@ _.extend(File.prototype, {
     _.each(this.js, function(js, i) {
       HTTP.get(Meteor.absoluteUrl(js), function(err, data) {
         if (err) {
-          throw err;
+          if (typeof callback === 'function')
+            callback(err);
+          else
+            throw err;
         } else {
           loaded[i] = {
             data: data.content,
@@ -42,6 +48,9 @@ _.extend(File.prototype, {
           loadedCount++;
           if (loadedCount >= loadedTarget) {
             self._evalJs(loaded);
+
+            if (typeof callback === 'function')
+              callback(null);
           }
         }
       });
